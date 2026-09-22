@@ -2464,7 +2464,12 @@ async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
     expected_item.set_turn_id_if_missing(&turn_context.sub_id);
 
     session
-        .record_inter_agent_communication(&turn_context, turn_context.model_info(), communication)
+        .record_inter_agent_communication(
+            &turn_context,
+            turn_context.model_info(),
+            communication,
+            None,
+        )
         .await;
 
     let recorded_history = session.clone_history().await;
@@ -2523,6 +2528,60 @@ async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
 }
 
 #[tokio::test]
+async fn accepted_user_prompt_persists_its_stable_review_metadata() {
+    let (mut session, turn_context) = make_session_and_context().await;
+    let rollout_path = attach_thread_persistence(&mut session).await;
+    let audit = codex_prompt_review::PromptReviewAudit {
+        schema_version: codex_prompt_review::PROMPT_REVIEW_AUDIT_VERSION.to_string(),
+        review_id: "sha256:review-id".to_string(),
+        prompt_hash: "sha256:prompt-hash".to_string(),
+        prompt_category: codex_prompt_review::PromptCategory::RootUser,
+        jev_model: "grok-test".to_string(),
+        jev_version: codex_prompt_review::JEV_REVIEW_SCHEMA_VERSION.to_string(),
+        timestamp_unix_ms: 1_700_000_000_000,
+        disposition: codex_prompt_review::PromptReviewDisposition::Allow,
+        latency_ms: 3,
+        failure_reason: None,
+    };
+    let input = vec![UserInput::Text {
+        text: "preserve me exactly".to_string(),
+        text_elements: Vec::new(),
+    }];
+
+    session
+        .record_user_prompt_and_emit_turn_item(
+            &turn_context,
+            turn_context.model_info(),
+            &input,
+            None,
+            None,
+            codex_thread_store::PersistContext::Standard,
+            Some(audit.clone()),
+        )
+        .await;
+    session.flush_rollout().await.expect("rollout should flush");
+
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let attached = resumed.history.iter().find_map(|item| match item {
+        RolloutItem::ResponseItem(envelope)
+            if matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "user") =>
+        {
+            envelope
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.prompt_review.as_ref())
+        }
+        _ => None,
+    });
+    assert_eq!(attached, Some(&audit));
+}
+
+#[tokio::test]
 async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resume() {
     let (mut session, turn_context, _rx) = make_session_and_context_with_auth_and_config_and_rx(
         CodexAuth::from_api_key("Test API Key"),
@@ -2541,7 +2600,12 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
     );
 
     session
-        .record_inter_agent_communication(&turn_context, turn_context.model_info(), communication)
+        .record_inter_agent_communication(
+            &turn_context,
+            turn_context.model_info(),
+            communication,
+            None,
+        )
         .await;
 
     let live_history = session.clone_history().await;
@@ -6411,6 +6475,11 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         ),
         tool_search_handler_cache: Default::default(),
         turn_environments: Arc::clone(&turn_environments),
+        prompt_review_gateway: crate::prompt_review_gateway::SharedPromptReviewGateway::new(
+            &config.prompt_review,
+        )
+        .0,
+        prompt_review_seen_subagent_prompt: std::sync::atomic::AtomicBool::new(false),
     };
 
     let session = Session {
@@ -8678,6 +8747,11 @@ where
         ),
         tool_search_handler_cache: Default::default(),
         turn_environments: Arc::clone(&turn_environments),
+        prompt_review_gateway: crate::prompt_review_gateway::SharedPromptReviewGateway::new(
+            &config.prompt_review,
+        )
+        .0,
+        prompt_review_seen_subagent_prompt: std::sync::atomic::AtomicBool::new(false),
     };
 
     let session = Arc::new(Session {

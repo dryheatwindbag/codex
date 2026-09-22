@@ -713,6 +713,7 @@ pub(crate) async fn record_pending_input(
     pending_input: TurnInput,
     additional_contexts: Vec<String>,
     persist_context: PersistContext,
+    prompt_review_audit: Option<codex_prompt_review::PromptReviewAudit>,
 ) {
     match pending_input {
         TurnInput::UserInput {
@@ -727,10 +728,14 @@ pub(crate) async fn record_pending_input(
                 client_id,
                 acceptance_order,
                 persist_context,
+                prompt_review_audit,
             )
             .await;
         }
-        TurnInput::ResponseItem(item) => {
+        TurnInput::ResponseItem(mut item) => {
+            if let Some(audit) = prompt_review_audit {
+                item.metadata.get_or_insert_default().prompt_review = Some(audit);
+            }
             sess.record_annotated_conversation_items(turn_context, model_info, vec![item])
                 .await;
         }
@@ -757,8 +762,13 @@ pub(crate) async fn record_pending_input(
             sess.ensure_rollout_materialized(persist_context).await;
         }
         TurnInput::InterAgentCommunication(communication) => {
-            sess.record_inter_agent_communication(turn_context, model_info, communication)
-                .await;
+            sess.record_inter_agent_communication(
+                turn_context,
+                model_info,
+                communication,
+                prompt_review_audit,
+            )
+            .await;
         }
     }
     record_additional_contexts(sess, turn_context, additional_contexts).await;

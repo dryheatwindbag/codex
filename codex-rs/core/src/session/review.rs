@@ -143,6 +143,7 @@ pub(super) async fn spawn_review_thread(
         auto_review_enabled,
         &model_info,
     ));
+    turn_metadata_state.set_turn_trigger("review".to_string());
 
     let extension_data = Arc::new(codex_extension_api::ExtensionData::new(
         review_turn_id.clone(),

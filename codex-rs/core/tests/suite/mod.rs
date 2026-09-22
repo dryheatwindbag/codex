@@ -151,6 +151,8 @@ mod plugins;
 mod prompt_cache_key;
 mod prompt_caching;
 mod prompt_debug_tests;
+#[cfg(unix)]
+mod prompt_review;
 mod quota_exceeded;
 mod realtime_conversation;
 mod realtime_initial_items;

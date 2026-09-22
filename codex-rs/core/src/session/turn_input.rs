@@ -99,6 +99,14 @@ impl PreparedTurnInputSettings {
         thread_settings: ThreadSettingsOverrides,
         start_options: TurnStartOptions,
     ) -> CodexResult<Self> {
+        if let Some(reason) = start_options.prompt_review_opt_out_reason.as_deref()
+            && !codex_prompt_review::is_valid_opt_out_reason(reason)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "prompt_review_opt_out_reason must be a 1-64 character audit code containing only letters, numbers, '.', '-', or '_'"
+                    .to_string(),
+            ));
+        }
         let thread_settings_update = if thread_settings == ThreadSettingsOverrides::default() {
             None
         } else {
@@ -135,6 +143,7 @@ impl PreparedTurnInputSettings {
             parent_turn_id,
             root_turn_id,
             cyber_access_program,
+            prompt_review_opt_out_reason: _,
         } = self.start_options;
         let emit_thread_settings_applied = self.thread_settings_update.is_some();
         let _settings_guard = if emit_thread_settings_applied {
@@ -300,6 +309,7 @@ async fn start_or_steer(
         }
     };
     let settings = PreparedTurnInputSettings::prepare(session, thread_settings, start).await?;
+    let prompt_review_opt_out_reason = settings.start_options.prompt_review_opt_out_reason.clone();
     match session
         .steer_input(
             &mut input,
@@ -307,6 +317,7 @@ async fn start_or_steer(
             /*expected_turn_id*/ None,
             settings.required_active_final_output_json_schema(),
             responsesapi_client_metadata.clone(),
+            prompt_review_opt_out_reason.clone(),
         )
         .await
     {
@@ -356,7 +367,15 @@ async fn start_or_steer(
             }
             let mut task_input = merge_additional_context_input(session, additional_context).await;
             if has_explicit_input {
-                task_input.push(pending_turn_input(session, input, &turn_context.sub_id).await);
+                let pending_input = pending_turn_input(session, input, &turn_context.sub_id).await;
+                if let Some(reason) = prompt_review_opt_out_reason {
+                    crate::prompt_review_gateway::register_prompt_review_opt_out(
+                        turn_context.as_ref(),
+                        &pending_input,
+                        reason,
+                    );
+                }
+                task_input.push(pending_input);
             }
             session
                 .spawn_task(turn_context, task_input, RegularTask::new())
@@ -457,6 +476,7 @@ async fn start_if_idle(
             return Err(error);
         }
     };
+    let prompt_review_opt_out_reason = settings.start_options.prompt_review_opt_out_reason.clone();
     let turn_context = match settings
         .apply_started(session, submission_id.clone(), kind)
         .await
@@ -489,17 +509,30 @@ async fn start_if_idle(
             if let SubmittedTurnInput::UserInput { content, .. } = &input {
                 turn_context.session_telemetry.user_prompt(content);
             }
-            task_input.push(pending_turn_input(session, input, &turn_context.sub_id).await);
+            let pending_input = pending_turn_input(session, input, &turn_context.sub_id).await;
+            if let Some(reason) = prompt_review_opt_out_reason {
+                crate::prompt_review_gateway::register_prompt_review_opt_out(
+                    turn_context.as_ref(),
+                    &pending_input,
+                    reason,
+                );
+            }
+            task_input.push(pending_input);
         }
         TurnStartKind::Automatic | TurnStartKind::Recovery => {
             // Empty automatic user input resumes sampling without a new message.
             if !matches!(&input, SubmittedTurnInput::UserInput { .. }) {
+                let pending_input = pending_turn_input(session, input, &turn_context.sub_id).await;
+                if let Some(reason) = prompt_review_opt_out_reason {
+                    crate::prompt_review_gateway::register_prompt_review_opt_out(
+                        turn_context.as_ref(),
+                        &pending_input,
+                        reason,
+                    );
+                }
                 session
                     .input_queue
-                    .extend_pending_input_for_turn_state(
-                        turn_state.as_ref(),
-                        vec![pending_turn_input(session, input, &turn_context.sub_id).await],
-                    )
+                    .extend_pending_input_for_turn_state(turn_state.as_ref(), vec![pending_input])
                     .await;
             }
         }
@@ -532,6 +565,7 @@ async fn steer(
         ));
     }
     let settings = PreparedTurnInputSettings::prepare(session, thread_settings, start).await?;
+    let prompt_review_opt_out_reason = settings.start_options.prompt_review_opt_out_reason.clone();
     match session
         .steer_input(
             &mut input,
@@ -539,6 +573,7 @@ async fn steer(
             Some(expected_turn_id.as_str()),
             settings.required_active_final_output_json_schema(),
             responsesapi_client_metadata,
+            prompt_review_opt_out_reason,
         )
         .await
     {
@@ -628,6 +663,7 @@ impl Session {
         expected_turn_id: Option<&str>,
         required_final_output_json_schema: Option<&Value>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
+        prompt_review_opt_out_reason: Option<String>,
     ) -> Result<String, NotSubmittedReason> {
         let mut active = self.active_turn.lock().await;
         let Some(active_turn) = active.as_mut() else {
@@ -696,6 +732,13 @@ impl Session {
             }
             input => pending_turn_input(self, input.clone(), active_turn_id).await,
         };
+        if let Some(reason) = prompt_review_opt_out_reason {
+            crate::prompt_review_gateway::register_prompt_review_opt_out(
+                active_task.turn_context.as_ref(),
+                &input,
+                reason,
+            );
+        }
         pending_input.push(input);
         self.input_queue
             .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(

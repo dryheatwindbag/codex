@@ -47,6 +47,7 @@ use codex_skills::SkillError;
 use codex_utils_git_discovery::GitRootDiscovery;
 use codex_utils_path::replace_path_and_deduplicate;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::Semaphore;
 
 type McpToolApprovalMetadataMap =
@@ -975,6 +976,39 @@ impl Session {
             thread_id.to_string(),
             thread_extension_init,
         );
+        let prompt_review_gateway = thread_extension_data
+            .get::<crate::prompt_review_gateway::SharedPromptReviewGateway>()
+            .unwrap_or_else(|| {
+                Arc::new(
+                    crate::prompt_review_gateway::SharedPromptReviewGateway::new(
+                        &config.prompt_review,
+                    ),
+                )
+            })
+            .0
+            .clone();
+        let mut prompt_review_seen_subagent_prompt = false;
+        if matches!(&initial_history, InitialHistory::Resumed(_)) {
+            let audits = initial_history
+                .get_rollout_items()
+                .iter()
+                .filter_map(|item| match item {
+                    RolloutItem::ResponseItem(envelope) => envelope
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.prompt_review.as_ref()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            prompt_review_seen_subagent_prompt = audits.iter().any(|audit| {
+                matches!(
+                    audit.prompt_category,
+                    codex_prompt_review::PromptCategory::SubagentInitial
+                        | codex_prompt_review::PromptCategory::SubagentFollowup
+                )
+            });
+            prompt_review_gateway.remember_audits(audits);
+        }
         // Capture follows the flag; replay selects reviewer policy from the saved checkpoint.
         let guardian_context_mode = GuardianContextMode::from_features(&config.features);
         thread_extension_data.insert(crate::context::GuardianReviewEvidence::default());
@@ -1738,6 +1772,10 @@ impl Session {
                 ),
                 tool_search_handler_cache: Default::default(),
                 turn_environments: Arc::clone(&turn_environments),
+                prompt_review_gateway,
+                prompt_review_seen_subagent_prompt: AtomicBool::new(
+                    prompt_review_seen_subagent_prompt,
+                ),
             };
             let (mcp_prewarm_tx, mcp_prewarm_rx) = async_channel::bounded(1);
             let sess = Arc::new(Session {

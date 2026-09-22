@@ -2898,6 +2898,7 @@ dependencies = [
  "codex-network-proxy",
  "codex-otel",
  "codex-plugin",
+ "codex-prompt-review",
  "codex-prompts",
  "codex-protocol",
  "codex-response-debug-context",
@@ -3514,6 +3515,7 @@ name = "codex-history"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "codex-prompt-review",
  "codex-protocol",
  "pretty_assertions",
  "schemars 0.8.22",
@@ -4139,6 +4141,23 @@ version = "0.0.0"
 dependencies = [
  "libc",
  "pretty_assertions",
+]
+
+[[package]]
+name = "codex-prompt-review"
+version = "0.0.0"
+dependencies = [
+ "codex-secrets",
+ "codex-utils-pty",
+ "libc",
+ "pretty_assertions",
+ "regex",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

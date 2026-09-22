@@ -3483,6 +3483,78 @@
       },
       "type": "object"
     },
+    "PromptReviewCategoryToml": {
+      "enum": [
+        "root_user",
+        "orchestration",
+        "subagent_initial",
+        "subagent_followup",
+        "retry",
+        "review"
+      ],
+      "type": "string"
+    },
+    "PromptReviewConfigToml": {
+      "additionalProperties": false,
+      "description": "External Jev prompt-review settings. Disabled unless explicitly enabled.",
+      "properties": {
+        "blocking_categories": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PromptReviewCategoryToml"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "exact_redactions": {
+          "default": [],
+          "description": "Exact private values removed from the reviewer copy only.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "executable": {
+          "type": "string"
+        },
+        "max_attempts": {
+          "format": "uint",
+          "maximum": 3.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "max_concurrency": {
+          "format": "uint",
+          "maximum": 32.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "max_input_bytes": {
+          "format": "uint",
+          "maximum": 1048576.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "max_output_bytes": {
+          "format": "uint",
+          "maximum": 1048576.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "format": "uint64",
+          "maximum": 60000.0,
+          "minimum": 100.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "RawMcpServerConfig": {
       "additionalProperties": false,
       "description": "Raw MCP config shape used for deserialization and supported-field JSON Schema generation.\n\nFields that are accepted only to produce targeted validation errors should be skipped in the generated schema.\n\nKeep `TryFrom<RawMcpServerConfig> for McpServerConfig` exhaustively destructuring this struct so new TOML fields cannot be added here without updating the validation/mapping logic that produces [`McpServerConfig`].",
@@ -7389,6 +7461,15 @@
         "$ref": "#/definitions/ProjectConfig"
       },
       "type": "object"
+    },
+    "prompt_review": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/PromptReviewConfigToml"
+        }
+      ],
+      "default": null,
+      "description": "Advisory external review for eligible task prompts."
     },
     "realtime": {
       "allOf": [

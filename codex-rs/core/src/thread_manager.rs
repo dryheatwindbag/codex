@@ -419,6 +419,7 @@ pub(crate) struct ThreadManagerState {
     session_source: SessionSource,
     installation_id: String,
     analytics_events_client: Option<AnalyticsEventsClient>,
+    prompt_review_gateway: crate::prompt_review_gateway::SharedPromptReviewGateway,
     // Captures submitted ops for testing purpose when test mode is enabled.
     ops_log: Option<SharedCapturedOps>,
 }
@@ -556,6 +557,8 @@ impl ThreadManager {
             } else {
                 Arc::new(DisabledCodeModeSessionProvider)
             };
+        let prompt_review_gateway =
+            crate::prompt_review_gateway::SharedPromptReviewGateway::new(&config.prompt_review);
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
@@ -581,6 +584,7 @@ impl ThreadManager {
                 session_source,
                 installation_id,
                 analytics_events_client,
+                prompt_review_gateway,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
             }),
@@ -705,6 +709,9 @@ impl ThreadManager {
             state_db.clone(),
         ));
         let agent_graph_store = local_agent_graph_store_from_state_db(state_db.as_ref());
+        let prompt_review_gateway = crate::prompt_review_gateway::SharedPromptReviewGateway::new(
+            &crate::config::PromptReviewConfig::default(),
+        );
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
@@ -733,6 +740,7 @@ impl ThreadManager {
                 session_source: SessionSource::Exec,
                 installation_id,
                 analytics_events_client: None,
+                prompt_review_gateway,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
             }),
@@ -2080,6 +2088,7 @@ impl ThreadManagerState {
                 }
             });
         thread_extension_init.insert(isolation);
+        thread_extension_init.insert(self.prompt_review_gateway.clone());
         let environments = environments.unwrap_or_else(|| {
             default_thread_environment_selections(
                 self.environment_manager.as_ref(),
