@@ -160,6 +160,42 @@ pub struct FeatureToggleToml {
     pub enabled: Option<bool>,
 }
 
+/// External Jev prompt-review settings. Disabled unless explicitly enabled.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PromptReviewConfigToml {
+    pub enabled: Option<bool>,
+    pub executable: Option<String>,
+    pub model: Option<String>,
+    #[schemars(range(min = 100, max = 60000))]
+    pub timeout_ms: Option<u64>,
+    #[schemars(range(min = 1, max = 1048576))]
+    pub max_input_bytes: Option<usize>,
+    #[schemars(range(min = 1, max = 1048576))]
+    pub max_output_bytes: Option<usize>,
+    #[schemars(range(min = 1, max = 3))]
+    pub max_attempts: Option<usize>,
+    #[schemars(range(min = 1, max = 32))]
+    pub max_concurrency: Option<usize>,
+    #[serde(default)]
+    pub blocking_categories: Vec<PromptReviewCategoryToml>,
+    /// Exact private values removed from the reviewer copy only.
+    #[serde(default)]
+    pub exact_redactions: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptReviewCategoryToml {
+    RootUser,
+    Orchestration,
+    SubagentInitial,
+    SubagentFollowup,
+    Retry,
+    Review,
+}
+
 /// Base config deserialized from ~/.codex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -168,6 +204,10 @@ pub struct ConfigToml {
     pub model: Option<String>,
     /// Review model override used by the `/review` feature.
     pub review_model: Option<String>,
+
+    /// Advisory external review for eligible task prompts.
+    #[serde(default)]
+    pub prompt_review: Option<PromptReviewConfigToml>,
 
     /// Provider to use from the model_providers map.
     pub model_provider: Option<String>,
@@ -1128,5 +1168,42 @@ command = "   "
                 "model_providers.amazon-bedrock: provider auth.command must not be empty"
             )
         );
+    }
+
+    #[test]
+    fn prompt_review_config_is_explicit_and_strict() {
+        let config: ConfigToml = toml::from_str(
+            r#"
+[prompt_review]
+enabled = true
+executable = "/opt/grok"
+model = "grok-review"
+timeout_ms = 1500
+max_input_bytes = 4096
+max_output_bytes = 8192
+max_attempts = 2
+max_concurrency = 3
+blocking_categories = ["review"]
+exact_redactions = ["private matter id"]
+"#,
+        )
+        .expect("prompt review config should deserialize");
+
+        let review = config.prompt_review.expect("prompt review config");
+        assert_eq!(review.enabled, Some(true));
+        assert_eq!(review.executable.as_deref(), Some("/opt/grok"));
+        assert_eq!(
+            review.blocking_categories,
+            vec![PromptReviewCategoryToml::Review]
+        );
+
+        let error = toml::from_str::<ConfigToml>(
+            r#"
+[prompt_review]
+surprise = true
+"#,
+        )
+        .expect_err("unknown review settings must be rejected");
+        assert!(error.to_string().contains("surprise"));
     }
 }

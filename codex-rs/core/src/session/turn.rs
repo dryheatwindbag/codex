@@ -28,6 +28,7 @@ use crate::mentions::collect_explicit_app_ids;
 use crate::mentions::collect_explicit_plugin_mentions;
 use crate::mentions::collect_tool_mentions_from_messages;
 use crate::plugins::build_plugin_injections;
+use crate::prompt_review_gateway::review_pending_input;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_retry::ResponsesStreamRequest;
@@ -79,6 +80,7 @@ use codex_file_system::FindUpErrorPolicy;
 use codex_file_system::find_nearest_ancestor_with_markers;
 use codex_login::CodexAuth;
 use codex_model_provider::RemoteCompactionSupport;
+use codex_prompt_review::PromptReviewDisposition;
 use codex_protocol::ResponseItemId;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ModeKind;
@@ -855,9 +857,39 @@ pub(crate) async fn run_hooks_and_record_inputs(
     }
     let mut blocked_input = false;
     let mut accepted_user_input = false;
-    for input_item in input {
+    for (input_index, input_item) in input.iter().enumerate() {
+        let mut prompt_review_audit = None;
+        if let Some(decision) =
+            review_pending_input(sess, turn_context, input_item, input_index).await
+        {
+            if let Some(advice) = decision.advice.as_deref() {
+                sess.send_event(
+                    turn_context,
+                    EventMsg::Warning(WarningEvent {
+                        message: format!("Jev prompt-review advice: {advice}"),
+                    }),
+                )
+                .await;
+            }
+            if let Some(message) = prompt_review_disposition_warning(
+                decision.audit.disposition,
+                decision.audit.failure_reason.as_deref(),
+            ) {
+                sess.send_event(turn_context, EventMsg::Warning(WarningEvent { message }))
+                    .await;
+            }
+            if decision.should_block {
+                sess.record_prompt_review_audit(decision.audit).await;
+                blocked_input = true;
+                continue;
+            }
+            prompt_review_audit = Some(decision.audit);
+        }
         let hook_outcome = inspect_pending_input(sess, turn_context, input_item).await;
         if hook_outcome.should_stop {
+            if let Some(audit) = prompt_review_audit {
+                sess.record_prompt_review_audit(audit).await;
+            }
             blocked_input = true;
             record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
         } else {
@@ -879,11 +911,39 @@ pub(crate) async fn run_hooks_and_record_inputs(
                 input_item.clone(),
                 hook_outcome.additional_contexts,
                 input_persist_context,
+                prompt_review_audit,
             )
             .await;
         }
     }
     blocked_input && !accepted_user_input
+}
+
+pub(crate) fn prompt_review_disposition_warning(
+    disposition: PromptReviewDisposition,
+    failure_reason: Option<&str>,
+) -> Option<String> {
+    let reason = failure_reason.unwrap_or("no reason supplied");
+    match disposition {
+        PromptReviewDisposition::RejectAdvisory => Some(format!(
+            "Jev rejected this prompt, but review is advisory; execution will continue: {reason}"
+        )),
+        PromptReviewDisposition::UnavailableAdvisory => Some(format!(
+            "Jev prompt review was unavailable; advisory execution will continue: {reason}"
+        )),
+        PromptReviewDisposition::MalformedAdvisory => Some(format!(
+            "Jev returned a malformed prompt review; advisory execution will continue: {reason}"
+        )),
+        PromptReviewDisposition::RejectBlocking
+        | PromptReviewDisposition::UnavailableBlocking
+        | PromptReviewDisposition::MalformedBlocking => {
+            Some(format!("Jev prompt review blocked this prompt: {reason}"))
+        }
+        PromptReviewDisposition::Disabled
+        | PromptReviewDisposition::Skipped
+        | PromptReviewDisposition::Allow
+        | PromptReviewDisposition::AllowWithAdvice => None,
+    }
 }
 
 fn turn_user_input(input: &[TurnInput]) -> Vec<UserInput> {

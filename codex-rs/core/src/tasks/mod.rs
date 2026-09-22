@@ -504,6 +504,21 @@ impl Session {
         if let Some(trigger) = start_options.turn_trigger {
             turn_context.turn_metadata_state.set_turn_trigger(trigger);
         }
+        if let Some(reason) = start_options.prompt_review_opt_out_reason
+            && let Some(prompt) = input.iter().rev().find(|prompt| {
+                matches!(
+                    prompt,
+                    TurnInput::InterAgentCommunication(communication)
+                        if communication.trigger_turn
+                )
+            })
+        {
+            crate::prompt_review_gateway::register_prompt_review_opt_out(
+                turn_context.as_ref(),
+                prompt,
+                reason,
+            );
+        }
         if let Some(id) = start_options.parent_turn_id {
             if let Some(initiating_agent_path) = input.iter().find_map(|item| {
                 let TurnInput::InterAgentCommunication(communication) = item else {

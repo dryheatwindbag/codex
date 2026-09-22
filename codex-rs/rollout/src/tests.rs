@@ -51,6 +51,34 @@ const NO_SOURCE_FILTER: &[SessionSource] = &[];
 const TEST_PROVIDER: &str = "test-provider";
 
 #[test]
+fn model_invisible_prompt_review_receipts_are_persisted() -> Result<()> {
+    let metadata: CodexHarnessMetadata = serde_json::from_value(serde_json::json!({
+        "prompt_review": {
+            "schema_version": "prompt_review.audit.v1",
+            "review_id": "sha256:review",
+            "prompt_hash": "sha256:prompt",
+            "prompt_category": "root_user",
+            "jev_model": "grok-review",
+            "jev_version": "jev.review.v1",
+            "timestamp_unix_ms": 1700000000000_u64,
+            "disposition": "allow",
+            "latency_ms": 12,
+            "failure_reason": null
+        }
+    }))?;
+    let receipt = RolloutItem::ResponseItem(ResponseItemEnvelope {
+        item: ResponseItem::Other,
+        metadata: Some(metadata),
+    });
+
+    assert!(crate::is_persisted_rollout_item(
+        &receipt,
+        codex_protocol::protocol::ThreadHistoryMode::Legacy
+    ));
+    Ok(())
+}
+
+#[test]
 fn rollout_line_decoder_preserves_canonical_json_compatibility() -> Result<()> {
     let cases = [
         r#"{"timestamp":"2025-01-03T12:00:00.000Z","ordinal":7,"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":null,"limit_name":null,"primary":{"used_percent":0.0,"window_minutes":60,"resets_at":1800000000},"secondary":{"used_percent":12.5,"window_minutes":10080,"resets_at":1800100000},"credits":null,"individual_limit":null,"spend_control_reached":null,"plan_type":null,"rate_limit_reached_type":null}}}"#,

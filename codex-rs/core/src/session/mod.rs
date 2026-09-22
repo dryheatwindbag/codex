@@ -3540,6 +3540,21 @@ impl Session {
         .await;
     }
 
+    /// Persists a model-invisible prompt-review receipt without adding prompt text to history.
+    pub(crate) async fn record_prompt_review_audit(
+        &self,
+        audit: codex_prompt_review::PromptReviewAudit,
+    ) {
+        self.persist_rollout_items(&[RolloutItem::ResponseItem(ResponseItemEnvelope {
+            item: ResponseItem::Other,
+            metadata: Some(CodexHarnessMetadata {
+                prompt_review: Some(audit),
+                ..Default::default()
+            }),
+        })])
+        .await;
+    }
+
     async fn record_prepared_conversation_items(
         &self,
         turn_context: &TurnContext,
@@ -3893,6 +3908,7 @@ impl Session {
         turn_context: &TurnContext,
         model_info: &ModelInfo,
         communication: InterAgentCommunication,
+        prompt_review_audit: Option<codex_prompt_review::PromptReviewAudit>,
     ) {
         let response_item = communication.to_model_input_item();
         let (items, _) = self
@@ -3913,7 +3929,13 @@ impl Session {
             RolloutItem::InterAgentCommunicationMetadata {
                 trigger_turn: communication.trigger_turn,
             },
-            RolloutItem::ResponseItem(response_item.into()),
+            RolloutItem::ResponseItem(ResponseItemEnvelope {
+                item: response_item,
+                metadata: prompt_review_audit.map(|audit| CodexHarnessMetadata {
+                    prompt_review: Some(audit),
+                    ..Default::default()
+                }),
+            }),
         ])
         .await;
         self.send_raw_response_items(turn_context, items).await;
@@ -4832,6 +4854,7 @@ impl Session {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub(crate) async fn record_user_prompt_and_emit_turn_item(
         &self,
         turn_context: &TurnContext,
@@ -4840,6 +4863,7 @@ impl Session {
         client_id: Option<String>,
         acceptance_order: Option<u64>,
         persist_context: PersistContext,
+        prompt_review_audit: Option<codex_prompt_review::PromptReviewAudit>,
     ) {
         // Persist the user message to history, but emit the turn item from `UserInput` so
         // UI-only `text_elements` are preserved. `ResponseItem::Message` does not carry
@@ -4855,10 +4879,13 @@ impl Session {
                 model_info,
                 vec![ResponseItemEnvelope {
                     item: response_item,
-                    metadata: acceptance_order.map(|order| CodexHarnessMetadata {
-                        user_input_order: Some(order),
-                        ..Default::default()
-                    }),
+                    metadata: (acceptance_order.is_some() || prompt_review_audit.is_some()).then(
+                        || CodexHarnessMetadata {
+                            user_input_order: acceptance_order,
+                            prompt_review: prompt_review_audit,
+                            ..Default::default()
+                        },
+                    ),
                 }],
             )
             .await;

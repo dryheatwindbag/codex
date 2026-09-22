@@ -176,6 +176,17 @@ pub struct TurnStartOptions {
     /// Explicit cyber treatment for this turn. Omission preserves the backend's
     /// automatic behavior.
     pub cyber_access_program: Option<CyberAccessProgram>,
+    /// Visible audit reason for skipping external prompt review on the submitted prompt only.
+    /// The prompt still executes unchanged under all other policies, and the opt-out is consumed
+    /// once even when steering an existing turn.
+    pub prompt_review_opt_out_reason: Option<String>,
+}
+
+impl TurnStartOptions {
+    pub fn with_prompt_review_opt_out(mut self, reason: impl Into<String>) -> Self {
+        self.prompt_review_opt_out_reason = Some(reason.into());
+        self
+    }
 }
 
 /// What Core did with input submitted through `start_or_steer_turn`.

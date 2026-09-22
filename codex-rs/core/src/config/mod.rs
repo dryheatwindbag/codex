@@ -173,6 +173,7 @@ mod permission_path;
 mod permission_profile_catalog;
 mod permission_profile_selection;
 mod permissions;
+mod prompt_review;
 mod requirements;
 mod resolved_permission_profile;
 #[cfg(test)]
@@ -212,6 +213,7 @@ pub use permissions::compile_permission_profile;
 pub(crate) use permissions::is_builtin_permission_profile_name;
 pub use permissions::network_proxy_config_from_profile_network;
 pub use permissions::resolve_permission_profile;
+pub use prompt_review::PromptReviewConfig;
 pub(crate) use resolved_permission_profile::PermissionProfileState;
 pub use token_budget_startup::TokenBudgetStartupConfig;
 pub use windows_sandbox_config::PreparedWindowsSandboxConfig;
@@ -620,6 +622,9 @@ pub struct Config {
 
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
+
+    /// External Jev review settings for task prompts.
+    pub prompt_review: PromptReviewConfig,
 
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,
@@ -4199,10 +4204,12 @@ impl Config {
         )
         .map_err(std::io::Error::from)?;
         let otel = otel::resolve_config(cfg.otel.unwrap_or_default(), &mut startup_warnings);
+        let prompt_review = prompt_review::resolve_prompt_review_config(cfg.prompt_review)?;
         let config = Self {
             model,
             service_tier,
             review_model,
+            prompt_review,
             model_context_window: cfg.model_context_window,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: cfg

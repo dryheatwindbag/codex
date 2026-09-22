@@ -1,4 +1,7 @@
 use anyhow::Result;
+use codex_prompt_review::PromptCategory;
+use codex_prompt_review::PromptReviewAudit;
+use codex_prompt_review::PromptReviewDisposition;
 use codex_protocol::models::ConfigurationReasoning;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
@@ -183,6 +186,35 @@ fn mcp_checkpoint_handles_missing_or_unknown_identity() -> Result<()> {
             status: McpAttributionStatus::AttributionError,
             sources: Vec::new(),
         })
+    );
+    Ok(())
+}
+
+#[test]
+fn prompt_review_audit_round_trips_without_a_prompt_body() -> Result<()> {
+    let metadata = CodexHarnessMetadata {
+        prompt_review: Some(PromptReviewAudit {
+            schema_version: "prompt_review.audit.v1".to_string(),
+            review_id: "sha256:review".to_string(),
+            prompt_hash: "sha256:abc".to_string(),
+            prompt_category: PromptCategory::SubagentInitial,
+            jev_model: "grok-review".to_string(),
+            jev_version: "jev.review.v1".to_string(),
+            timestamp_unix_ms: 1_700_000_000_000,
+            disposition: PromptReviewDisposition::AllowWithAdvice,
+            latency_ms: 42,
+            failure_reason: None,
+        }),
+        ..Default::default()
+    };
+
+    let serialized = serde_json::to_value(&metadata)?;
+
+    assert!(serialized.get("prompt").is_none());
+    assert!(serialized.get("advice").is_none());
+    assert_eq!(
+        serde_json::from_value::<CodexHarnessMetadata>(serialized)?,
+        metadata
     );
     Ok(())
 }

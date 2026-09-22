@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::agent::LocalAgentControl;
 use crate::agent::control::LocalAgentRuntime;
@@ -101,4 +102,6 @@ pub(crate) struct SessionServices {
     pub(crate) code_mode_service: CodeModeService,
     pub(crate) tool_search_handler_cache: ToolSearchHandlerCache,
     pub(crate) turn_environments: Arc<ThreadEnvironments>,
+    pub(crate) prompt_review_gateway: Arc<codex_prompt_review::PromptReviewGateway>,
+    pub(crate) prompt_review_seen_subagent_prompt: AtomicBool,
 }

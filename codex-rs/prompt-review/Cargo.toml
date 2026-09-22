@@ -1,0 +1,32 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "codex-prompt-review"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "codex_prompt_review"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+codex-secrets = { workspace = true }
+regex = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "process", "sync", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+codex-utils-pty = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

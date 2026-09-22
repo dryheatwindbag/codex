@@ -9,6 +9,7 @@ use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use codex_prompt_review::PromptReviewAudit;
 use codex_protocol::ThreadId;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
@@ -96,6 +97,10 @@ pub struct CodexHarnessMetadata {
     /// Sender context captured by the host when this task message was accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_user_messages: Option<Box<SenderUserMessages>>,
+
+    /// Model-invisible Jev review receipt. Never contains the prompt body or advice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_review: Option<PromptReviewAudit>,
 }
 
 fn deserialize_mcp_attribution_checkpoint<'de, D>(
